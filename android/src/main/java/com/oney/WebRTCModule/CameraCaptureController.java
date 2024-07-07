@@ -3,10 +3,13 @@ package com.oney.WebRTCModule;
 import android.util.Log;
 
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.ReactApplicationContext;
 
 import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.VideoCapturer;
+import org.webrtc.SurfaceTextureHelper;
+import org.webrtc.VideoSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,6 +21,9 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
     private static final String TAG = CameraCaptureController.class.getSimpleName();
 
     private boolean isFrontFacing;
+    private boolean isUvc;
+
+    private int deviceIndex;
 
     private final CameraEnumerator cameraEnumerator;
     private final ReadableMap constraints;
@@ -35,15 +41,15 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
 
         this.cameraEnumerator = cameraEnumerator;
         this.constraints = constraints;
+        this.deviceIndex = 0;
     }
 
-    public void switchCamera() {
+    public void switchCamera(SurfaceTextureHelper surfaceTextureHelper, ReactApplicationContext reactContext, VideoSource videoSource) {
         if (videoCapturer instanceof CameraVideoCapturer) {
             CameraVideoCapturer capturer = (CameraVideoCapturer) videoCapturer;
             String[] deviceNames = cameraEnumerator.getDeviceNames();
             int deviceCount = deviceNames.length;
 
-            // Nothing to switch to.
             if (deviceCount < 2) {
                 return;
             }
@@ -64,9 +70,39 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
                 return;
             }
 
-            // If we are here the device has more than 2 cameras. Cycle through them
-            // and switch to the first one of the desired facing mode.
-            switchCamera(!isFrontFacing, deviceCount);
+            deviceIndex = (deviceIndex + 1) % deviceNames.length;
+            String nextCameraName = deviceNames[deviceIndex];
+
+            if (isUvcCamera(nextCameraName)) {
+                switchToUvcCamera(surfaceTextureHelper, reactContext, videoSource);
+            } else {
+                switchToRegularCamera(surfaceTextureHelper, reactContext, videoSource);
+                // If we are here the device has more than 2 cameras. Cycle through them
+                // and switch to the first one of the desired facing mode.
+                switchCamera(!isFrontFacing, deviceCount);
+            }
+        }
+    }
+
+    private boolean isUvcCamera(String deviceName) {
+        return deviceName != null && deviceName.startsWith(UVCCamera2Enumerator.UVC_PREFIX);
+    }
+
+    private void disposeCurrentCapturer() {
+        if (videoCapturer != null) {
+            try {
+                videoCapturer.stopCapture();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            videoCapturer.dispose();
+            videoCapturer = null;
+        }
+    }
+
+    private void initializeVideoCapturer(SurfaceTextureHelper surfaceTextureHelper, ReactApplicationContext reactContext, VideoSource videoSource) {
+        if (videoCapturer != null) {
+            videoCapturer.initialize(surfaceTextureHelper, reactContext, videoSource.getCapturerObserver());
         }
     }
 
@@ -76,6 +112,34 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
         String facingMode = ReactBridgeUtil.getMapStrValue(this.constraints, "facingMode");
 
         return createVideoCapturer(deviceId, facingMode);
+    }
+
+    protected VideoCapturer createDeviceVideoCapturer() {
+        String facingMode = ReactBridgeUtil.getMapStrValue(this.constraints, "facingMode");
+
+        return createVideoCapturer(String.valueOf(deviceIndex), facingMode);
+    }
+
+    private void switchToRegularCamera(SurfaceTextureHelper surfaceTextureHelper, ReactApplicationContext reactContext, VideoSource videoSource) {
+        if (!isUvc) {
+            return;
+        }
+
+        disposeCurrentCapturer();
+        videoCapturer = createVideoCapturer();
+        initializeVideoCapturer(surfaceTextureHelper, reactContext, videoSource);
+        startCapture();
+
+        isUvc = false;
+    }
+
+    private void switchToUvcCamera(SurfaceTextureHelper surfaceTextureHelper, ReactApplicationContext reactContext, VideoSource videoSource) {
+        disposeCurrentCapturer();
+        videoCapturer = createDeviceVideoCapturer();
+        initializeVideoCapturer(surfaceTextureHelper, reactContext, videoSource);
+        startCapture();
+
+        isUvc = true;
     }
 
     /**

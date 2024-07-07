@@ -243,7 +243,9 @@ class GetUserMediaImpl {
         TrackPrivate track = tracks.get(trackId);
         if (track != null && track.videoCaptureController instanceof CameraCaptureController) {
             CameraCaptureController cameraCaptureController = (CameraCaptureController) track.videoCaptureController;
-            cameraCaptureController.switchCamera();
+            SurfaceTextureHelper surfaceTextureHelper = track.surfaceTextureHelper;
+            VideoSource videoSource = (VideoSource) track.mediaSource;
+            cameraCaptureController.switchCamera(surfaceTextureHelper, reactContext, videoSource);
         }
     }
 
